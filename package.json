@@ -1,0 +1,14 @@
+{
+  "name": "bdfr-cleara",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cleara privacy cleanup MVP",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "module"
+}
