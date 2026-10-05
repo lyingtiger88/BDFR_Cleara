@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAuthorizeUrl, createPkcePair, deletePost, exchangeCode, getAuthenticatedUser, listOwnPosts, refreshAccessToken, X_SCOPES } from '../src/connectors/x.js';
+import { buildAuthorizeUrl, createPkcePair, deletePost, exchangeCode, getAuthenticatedUser, listOwnPosts, listOwnPostsPage, refreshAccessToken, X_SCOPES } from '../src/connectors/x.js';
 
 function response(status, data, headers={}) { return new Response(JSON.stringify(data), { status, headers:{'content-type':'application/json',...headers} }); }
 
@@ -12,3 +12,15 @@ test('users/me maps identity',async()=>{const fetchImpl=async()=>response(200,{d
 test('user posts pagination maps posts',async()=>{let calls=0;const fetchImpl=async()=>{calls++;return calls===1?response(200,{data:[{id:'1',text:'one',created_at:'2026-01-01T00:00:00Z'}],meta:{next_token:'next'}}):response(200,{data:[{id:'2',text:'two',created_at:'2026-01-02T00:00:00Z'}],meta:{}})};const data=await listOwnPosts('token','42',{}, {fetchImpl});assert.equal(data.length,2);assert.equal(calls,2);assert.equal(data[1].url,'https://x.com/i/web/status/2')});
 test('delete post uses DELETE and reports success',async()=>{let method;const fetchImpl=async(_url,init)=>{method=init.method;return response(200,{data:{deleted:true}})};assert.deepEqual(await deletePost('token','99',{fetchImpl}),{id:'99',deleted:true});assert.equal(method,'DELETE')});
 test('429 exposes reset timestamp',async()=>{const fetchImpl=async()=>response(429,{title:'Too Many Requests'},{'x-rate-limit-reset':'1999999999'});await assert.rejects(()=>getAuthenticatedUser('token',{fetchImpl}),(e)=>e.status===429&&e.rateLimitReset===1999999999)});
+
+test('single-page X scan returns a resumable cursor',async()=>{
+  let seenUrl;
+  const fetchImpl=async(url)=>{seenUrl=url;return response(200,{data:[{id:'10',text:'page one'}],meta:{result_count:1,next_token:'cursor-2'}})};
+  const page=await listOwnPostsPage('token','42',{maxResults:25,paginationToken:'cursor-1'},{fetchImpl});
+  assert.equal(page.items.length,1);
+  assert.equal(page.nextToken,'cursor-2');
+  assert.equal(page.resultCount,1);
+  const url=new URL(seenUrl);
+  assert.equal(url.searchParams.get('pagination_token'),'cursor-1');
+  assert.equal(url.searchParams.get('max_results'),'25');
+});
