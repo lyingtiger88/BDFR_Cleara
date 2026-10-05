@@ -83,28 +83,60 @@ export async function getAuthenticatedUser(accessToken, options = {}) {
   return { id:user.id, username:user.username, name:user.name, profileImageUrl:user.profile_image_url };
 }
 
-export async function listOwnPosts(accessToken, userId, { maxPages = 10, maxResults = 100, exclude = [] } = {}, options = {}) {
+function mapPost(post) {
+  return {
+    id:post.id,
+    type:'post',
+    title:(post.text || '').slice(0,90) || '(empty post)',
+    body:post.text || '',
+    url:`https://x.com/i/web/status/${post.id}`,
+    createdAt:post.created_at || null,
+    conversationId:post.conversation_id || null,
+    metrics:post.public_metrics || null
+  };
+}
+
+export async function listOwnPostsPage(
+  accessToken,
+  userId,
+  { maxResults = 100, exclude = [], paginationToken = null } = {},
+  options = {}
+) {
   if (!userId) throw new Error('X userId is required.');
+  const params = new URLSearchParams({
+    max_results:String(Math.max(5, Math.min(100, maxResults))),
+    'tweet.fields':'id,text,created_at,conversation_id,public_metrics'
+  });
+  if (exclude.length) params.set('exclude', exclude.join(','));
+  if (paginationToken) params.set('pagination_token', paginationToken);
+
+  const result = await apiRequest(
+    `/users/${encodeURIComponent(userId)}/tweets?${params}`,
+    accessToken,
+    {},
+    options
+  );
+  const data = Array.isArray(result?.data) ? result.data : [];
+  return {
+    items:data.map(mapPost),
+    nextToken:result?.meta?.next_token || null,
+    resultCount:Number(result?.meta?.result_count ?? data.length)
+  };
+}
+
+export async function listOwnPosts(accessToken, userId, { maxPages = 10, maxResults = 100, exclude = [] } = {}, options = {}) {
   const items = [];
   let paginationToken = null;
   for (let page = 0; page < maxPages; page += 1) {
-    const params = new URLSearchParams({ max_results:String(Math.max(5, Math.min(100, maxResults))), 'tweet.fields':'id,text,created_at,conversation_id,public_metrics' });
-    if (exclude.length) params.set('exclude', exclude.join(','));
-    if (paginationToken) params.set('pagination_token', paginationToken);
-    const result = await apiRequest(`/users/${encodeURIComponent(userId)}/tweets?${params}`, accessToken, {}, options);
-    const data = Array.isArray(result?.data) ? result.data : [];
-    items.push(...data.map((post) => ({
-      id:post.id,
-      type:'post',
-      title:(post.text || '').slice(0,90) || '(empty post)',
-      body:post.text || '',
-      url:`https://x.com/i/web/status/${post.id}`,
-      createdAt:post.created_at || null,
-      conversationId:post.conversation_id || null,
-      metrics:post.public_metrics || null
-    })));
-    paginationToken = result?.meta?.next_token || null;
-    if (!paginationToken || data.length === 0) break;
+    const result = await listOwnPostsPage(
+      accessToken,
+      userId,
+      { maxResults, exclude, paginationToken },
+      options
+    );
+    items.push(...result.items);
+    paginationToken = result.nextToken;
+    if (!paginationToken || result.items.length === 0) break;
   }
   return items;
 }
