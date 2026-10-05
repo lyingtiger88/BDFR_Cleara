@@ -5,7 +5,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectors } from './src/connectors/catalog.js';
 import { validateGitHubToken, listGists, deleteGist } from './src/connectors/github.js';
-import { buildAuthorizeUrl, createOAuthState, createPkcePair, deletePost, exchangeCode, getAuthenticatedUser, listOwnPosts, refreshAccessToken } from './src/connectors/x.js';
+import { buildAuthorizeUrl, createOAuthState, createPkcePair, deletePost, exchangeCode, getAuthenticatedUser, listOwnPosts, listOwnPostsPage, refreshAccessToken } from './src/connectors/x.js';
 import { filterItems } from './src/core/filter-engine.js';
 
 const ROOT=fileURLToPath(new URL('.',import.meta.url));
@@ -54,7 +54,14 @@ async function api(req,res,url){
     const connectionId=url.searchParams.get('connectionId');const session=xSessions.get(connectionId);if(!session)return json(res,200,{connected:false});return json(res,200,{connected:true,user:session.user,expiresAt:session.expiresAt,refreshable:Boolean(session.refreshToken)});
   }
   if(req.method==='POST'&&url.pathname==='/api/x/scan'){
-    const {connectionId,filter={},exclude=[]}=await body(req);const session=await freshXSession(connectionId);const items=await listOwnPosts(session.accessToken,session.user.id,{exclude});return json(res,200,{total:items.length,matched:filterItems(items,filter),user:session.user});
+    const {connectionId,filter={},exclude=[],paginationToken=null,pageSize=null}=await body(req);
+    const session=await freshXSession(connectionId);
+    if(paginationToken!==null||pageSize!==null){
+      const page=await listOwnPostsPage(session.accessToken,session.user.id,{exclude,paginationToken,maxResults:pageSize||100});
+      return json(res,200,{total:page.items.length,matched:filterItems(page.items,filter),nextToken:page.nextToken,resultCount:page.resultCount,user:session.user});
+    }
+    const items=await listOwnPosts(session.accessToken,session.user.id,{exclude});
+    return json(res,200,{total:items.length,matched:filterItems(items,filter),nextToken:null,user:session.user});
   }
   if(req.method==='POST'&&url.pathname==='/api/x/delete'){
     const {connectionId,ids,confirmation}=await body(req);if(!Array.isArray(ids)||!ids.length)return json(res,400,{error:'Select at least one X post.'});if(confirmation!=='DELETE')return json(res,400,{error:'Explicit DELETE confirmation is required.'});const session=await freshXSession(connectionId);const results=[];for(const id of ids){try{results.push(await deletePost(session.accessToken,id))}catch(error){results.push({id,deleted:false,error:error.message,status:error.status,rateLimitReset:error.rateLimitReset})}}return json(res,200,{results});
