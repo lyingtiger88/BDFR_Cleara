@@ -1,5 +1,5 @@
 const $=(id)=>document.getElementById(id);
-const state={gh:[],x:[],xConnectionId:sessionStorage.getItem('cleara.x.connectionId')||''};
+const state={gh:[],x:[],xConnectionId:sessionStorage.getItem('cleara.x.connectionId')||'',xNextToken:null,xScannedTotal:0};
 
 async function call(path,options={}){
   const res=await fetch(path,{headers:{'Content-Type':'application/json'},...options});
@@ -73,16 +73,48 @@ $('xDisconnect').onclick=async()=>{
   sessionStorage.removeItem('cleara.x.connectionId');state.xConnectionId='';$('xIdentity').textContent='Disconnected';$('xScan').disabled=true;$('xDisconnect').disabled=true;
 };
 
+function xExclude(){
+  const exclude=[];
+  if($('xExcludeReplies').checked)exclude.push('replies');
+  if($('xExcludeRetweets').checked)exclude.push('retweets');
+  return exclude;
+}
+
+async function scanXPage(paginationToken=null,append=false){
+  const d=await call('/api/x/scan',{method:'POST',body:JSON.stringify({
+    connectionId:state.xConnectionId,
+    filter:filter('x'),
+    exclude:xExclude(),
+    paginationToken,
+    pageSize:100
+  })});
+  state.xNextToken=d.nextToken||null;
+  state.xScannedTotal=append?state.xScannedTotal+d.total:d.total;
+  const items=append?[...state.x,...d.matched]:d.matched;
+  render('x',items,state.xScannedTotal,'posts');
+  $('xLoadMore').disabled=!state.xNextToken;
+  if(state.xNextToken)$('xSummary').textContent+=` More posts are available.`;
+}
+
 $('xScan').onclick=async()=>{
   try{
     $('xSummary').textContent='Scanning…';
-    const exclude=[];
-    if($('xExcludeReplies').checked)exclude.push('replies');
-    if($('xExcludeRetweets').checked)exclude.push('retweets');
-    const d=await call('/api/x/scan',{method:'POST',body:JSON.stringify({connectionId:state.xConnectionId,filter:filter('x'),exclude})});
-    render('x',d.matched,d.total,'posts');
+    state.xNextToken=null;state.xScannedTotal=0;
+    $('xLoadMore').disabled=true;
+    await scanXPage(null,false);
   }catch(e){
     $('xSummary').textContent=e.rateLimitReset?`${e.message}. Retry after ${new Date(e.rateLimitReset*1000).toLocaleTimeString()}.`:e.message;
+  }
+};
+
+$('xLoadMore').onclick=async()=>{
+  if(!state.xNextToken)return;
+  const token=state.xNextToken;
+  $('xLoadMore').disabled=true;
+  try{await scanXPage(token,true)}
+  catch(e){
+    $('xSummary').textContent=e.rateLimitReset?`${e.message}. Retry after ${new Date(e.rateLimitReset*1000).toLocaleTimeString()}.`:e.message;
+    $('xLoadMore').disabled=!state.xNextToken;
   }
 };
 
